@@ -1,0 +1,31 @@
+{
+    "Controller_Settings": {
+        "Motor Axis": [
+            1,
+            0,
+            1,
+            0
+        ],
+        "Proportional Constant": [
+            -5,
+            5,
+            5,
+            5
+        ],
+        "Error threshold": 0.25,
+        "Error change threshold": 0.1
+    },
+    "DetectorConfig":
+    {
+        "min_spot_area": 50
+        "threshold": 3,
+        "gamma": 1.1,
+        "contrast_alpha": 4,
+        "contrast_beta": 20
+    }
+    "Targets":
+    {
+        "t1": []
+        "t2": []
+    }
+}

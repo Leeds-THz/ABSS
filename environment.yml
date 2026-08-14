@@ -1,0 +1,16 @@
+name: beam
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - h5py
+  - pip
+  - pip:
+    - pylablib
+    - opencv-python
+    - pillow
