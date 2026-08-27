@@ -237,45 +237,56 @@ def BeamAlignment(stage, cam, swapSpots=False,
     }
     t0 = time.time()
 
-    def log_move(i, curSpotNo, steps_cmd, prevError):
-        cur_spot = GetCurrentSpot(cam, curSpotNo)
-        log["t"].append(time.time() - t0)
-        log["motor"].append(i + 1)
-        log["steps"].append(steps_cmd)
-        log["spot"].append(curSpotNo)
-        log["axis"].append(motorAxisLUT[i])
-        log["px"].append(cur_spot[0])
-        log["py"].append(cur_spot[1])
-        log["error"].append(prevError)
+    # def log_move(i, curSpotNo, steps_cmd, prevError):
+    #     cur_spot = GetCurrentSpot(cam, curSpotNo)
+    #     log["t"].append(time.time() - t0)
+    #     log["motor"].append(i + 1)
+    #     log["steps"].append(steps_cmd)
+    #     log["spot"].append(curSpotNo)
+    #     log["axis"].append(motorAxisLUT[i])
+    #     log["px"].append(cur_spot[0])
+    #     log["py"].append(cur_spot[1])
+    #     log["error"].append(prevError)
 
     try:
         while True:
             
-
             motors_moved = False
 
+            # Iterate through the motor axes
             for i in range(4):
+                # Set which spot it being checked for this motor
                 curSpotNo = 0 if i < 2 else 1
                 if swapSpots:
                     curSpotNo = 1 - curSpotNo
 
-                if GetSpotAmount(cam) < 2:
-                    if singlePass:
-                        print("Lost spots – aborting")
-                        return -3
+
+                while True:
+                    # Check if there are two spots on the camera
+                    # If there isn't - do nothing
+                    if GetSpotAmount(cam) < 2:
+                        if singlePass:
+                            print("Lost spots – aborting")
+                            return -3
+                        else:
+                            break
+
+                    # Get the current error for the given motor axis
+                    prevError, _ = GetSpotError(cam, targetDict, curSpotNo, motorAxisLUT[i])
+
+                    # If the error is above threshold
+                    if abs(prevError) > errThresh:
+                        # Move motor to correct for error
+                        steps_cmd = int(round(KpLUT[i] * prevError))
+
+                        if steps_cmd != 0:
+                            stage.move_by(i + 1, steps_cmd)
+                            stage.wait_move()
+                            motors_moved = True
+                            # log_move(i, curSpotNo, steps_cmd, prevError)
+                    # If there is no more error in this axis, move onto the next axis
                     else:
                         break
-
-                prevError, _ = GetSpotError(cam, targetDict, curSpotNo, motorAxisLUT[i])
-
-                if abs(prevError) > errThresh:
-                    steps_cmd = int(round(KpLUT[i] * prevError))
-
-                    if steps_cmd != 0:
-                        stage.move_by(i + 1, steps_cmd)
-                        stage.wait_move()
-                        motors_moved = True
-                        # log_move(i, curSpotNo, steps_cmd, prevError)
 
             if not motors_moved:
                 if singlePass:
