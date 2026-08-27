@@ -33,69 +33,38 @@ import libusb_package
 from dataclasses import dataclass
 
 # =====================================================================
-# Data Classes
-# =====================================================================
-
-log = {
-    "t": [],          # time since start (s)
-    "motor": [],      # which motor (1-4)
-    "steps": [],      # signed steps commanded
-    "spot": [],       # which spot (0 or 1)
-    "axis": [],       # 0 = x, 1 = y
-    "px": [],         # current pixel x of the spot
-    "py": [],         # current pixel y of the spot
-    "error": [],      # signed error on the controlled axis
-}
-
-@dataclass(frozen=True)
-class CameraConfig:
-    roi: Tuple[int, int, int, int] = (0, 1440, 0, 1080)
-    exposure: float = 0.02
-    frame_period: float = 0.035
-
-    
-@dataclass
-class DetectionConfig:
-    min_spot_area: int = 50
-    threshold: int = 3
-    gamma: float = 1.1
-    contrast_alpha: float = 4.0
-    contrast_beta: float = 20.0
-
-
-# =====================================================================
 # Camera Image Processing 
 # =====================================================================
 
-def InitCamera():
+def InitCamera(settingsDict):
     cam = Thorlabs.ThorlabsTLCamera()
-    cam_cfg = CameraConfig()
-    cam.set_roi(*cam_cfg.roi)
-    cam.set_exposure(cam_cfg.exposure)
-    cam.set_frame_period(cam_cfg.frame_period)
+    cam_cfg = settingsDict["CameraConfig"]
+    cam.set_roi(*cam_cfg["roi"])
+    cam.set_exposure(cam_cfg["exposure"])
+    cam.set_frame_period(cam_cfg["frame_period"])
     cam.start_acquisition()
 
     return cam
 
 
-def preprocess_image(gray: np.ndarray, cfg: DetectionConfig) -> np.ndarray:
+def preprocess_image(gray: np.ndarray, cfg) -> np.ndarray:
     # Subtract mean background, apply gamma correction
     background = np.mean(gray)
     gray = gray.astype(np.float32) - background
     gray = np.clip(gray, 0, 255).astype(np.uint8)
-    gray = (gray / 255.0) ** cfg.gamma
+    gray = (gray / 255.0) ** cfg["gamma"]
     gray = (gray * 255).astype(np.uint8)
     return gray
 
-def detect_two_spots(gray: np.ndarray, cfg: DetectionConfig) -> List[Tuple]:
+def detect_two_spots(gray: np.ndarray, cfg) -> List[Tuple]:
     # Thresold connected components. Keeping the two largest spots.
-    _, binary = cv2.threshold(gray, cfg.threshold, 255, cv2.THRESH_BINARY)
+    _, binary = cv2.threshold(gray, cfg["threshold"], 255, cv2.THRESH_BINARY)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
 
     spots = []
     for i in range(1, num_labels):
         area = stats[i, cv2.CC_STAT_AREA]
-        if area > cfg.min_spot_area:
+        if area > cfg["min_spot_area"]:
             x = stats[i, cv2.CC_STAT_LEFT]
             y = stats[i, cv2.CC_STAT_TOP]
             w = stats[i, cv2.CC_STAT_WIDTH]
@@ -106,19 +75,19 @@ def detect_two_spots(gray: np.ndarray, cfg: DetectionConfig) -> List[Tuple]:
     return spots
 
 
-def calculate_centroid(gray: np.ndarray, roi: Tuple, cfg: DetectionConfig) -> Optional[Point]:
+def calculate_centroid(gray: np.ndarray, roi: Tuple, cfg) -> Optional[Point]:
     # Intensity-weighted centre-of-mass inside bounding box of the spot
     # define region of interest for beam spot
     x, y, w, h = roi
     roi_img = gray[y:y+h, x:x+w].astype(np.float32)
-    roi_img[roi_img < cfg.threshold] = 0
+    roi_img[roi_img < cfg["threshold"]] = 0
     if np.sum(roi_img) == 0:
         return None
     cy, cx = ndimage.center_of_mass(roi_img)
     return (cx + x, cy + y)
 
 
-def process_frame(frame: np.ndarray, cfg: DetectionConfig) -> Tuple[Optional[List[Point]], np.ndarray]:
+def process_frame(frame: np.ndarray, cfg) -> Tuple[Optional[List[Point]], np.ndarray]:
     # Full pipeline: 16-bit -> 8-bit conversion -> contrast stretch -> preprocess -> detect -> centroids
     if len(frame.shape) == 3:
         gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -131,7 +100,7 @@ def process_frame(frame: np.ndarray, cfg: DetectionConfig) -> Tuple[Optional[Lis
     elif gray.dtype != np.uint8:
         gray = gray.astype(np.uint8)
 
-    gray = cv2.convertScaleAbs(gray, alpha=cfg.contrast_alpha, beta=cfg.contrast_beta)
+    gray = cv2.convertScaleAbs(gray, alpha=cfg["contrast_alpha"], beta=cfg["contrast_beta"])
     processed = preprocess_image(gray, cfg)
 
     spots = detect_two_spots(processed, cfg)
@@ -162,7 +131,7 @@ def GetCurrentSpot(cam, spotNo):
     # Returns [x, y] of the requested spot (0 or 1)
     # Assumes the two largest spots are ordered consistently
     
-    det_cfg = DetectionConfig()
+    det_cfg = settingsDict["DetectorConfig"]
     curFrame = GetCurrentCameraFrame(cam)
     centroids, _ = process_frame(curFrame, det_cfg)
     SpotAmount = len(centroids)
@@ -180,7 +149,7 @@ def GetCurrentSpot(cam, spotNo):
     # TODO: Add error handling for no spots
 
 def GetSpotAmount(cam):
-    det_cfg = DetectionConfig()
+    det_cfg = settingsDict["DetectorConfig"]
     curFrame = GetCurrentCameraFrame(cam)
     centroids, _ = process_frame(curFrame, det_cfg)
     SpotAmount = len(centroids)
@@ -203,12 +172,13 @@ def GetSpotError(cam, targetDict, spotNo, axis):
 # Beam Correction
 # =====================================================================
 
-def SetTargetPositionsFromCurrentFrame(cam):
+def SetTargetPositionsFromCurrentFrame(settingsDict, cam):
     # Get current camera frame
     # GetCurrentCameraFrame()
 
     # Acquire the current camera frame
-    det_cfg = DetectionConfig()
+    # det_cfg = DetectionConfig()
+    det_cfg = settingsDict["DetectorConfig"]
     curFrame = GetCurrentCameraFrame(cam)
     centroids, _ = process_frame(curFrame, det_cfg)
 
@@ -226,7 +196,7 @@ def BeamAlignment(stage, cam, swapSpots=False,
     singlePass=True  → one clean pass, then stop when settled
     singlePass=False → continuous correction until lost spots or Ctrl-C
     """
-    targetDict = SetTargetPositionsFromCurrentFrame(cam)
+    targetDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
 
     motorAxisLUT = [1, 0, 1, 0]      # motor → axis (0=x, 1=y)
     KpLUT = [5.0, 5.0, 5.0, 5.0]
@@ -306,28 +276,35 @@ def BeamAlignment(stage, cam, swapSpots=False,
 
     return 0
 
+# =====================================================================
+# Settings
+# =====================================================================
 
-def SettingsDictToDetectorConfig(settingsDict):
-    return DetectionConfig(settingsDict["DetectorConfig"]["min_spot_area"])
+def LoadSettings(settingsFile: String = "settings.json"):
+    with open(settingsFile, 'r') as f:
+        return json.load(f)
+
 
 # =====================================================================
 # Main
 # =====================================================================
 
 if __name__ == "__main__":
+    settingsDict = LoadSettings()
+
     # Acquire the libusb.dll (from libusb_package) and set it as the usb backend
     libusb1_backend = usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
     usb_devices = usb.core.find(backend=libusb1_backend, find_all=True)
 
     stage = Newport.Picomotor8742()
 
-    cam = InitCamera()
+    cam = InitCamera(settingsDict)
 
     # time.sleep(1)
     print("ABSS Starting...")
     # Single Pass Instantiatiom
     # Continuous stabilisation (what you want most of the time)
-    BeamAlignment(stage, cam, swapSpots=True, errThresh=0.25, singlePass=False)
+    BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=False)
     # One-shot alignment
     # BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=True)
     # plot_pixel_vs_time()

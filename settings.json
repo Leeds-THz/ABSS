@@ -7,25 +7,31 @@
             0
         ],
         "Proportional Constant": [
-            -5,
-            5,
-            5,
-            5
+            5.0,
+            5.0,
+            5.0,
+            5.0
         ],
-        "Error threshold": 0.25,
+        "Error threshold": 0.5,
         "Error change threshold": 0.1
+    },
+    "CameraConfig":
+    {
+        "roi": [0, 1440, 0, 1080],
+        "exposure": 0.02,
+        "frame_period": 0.035
     },
     "DetectorConfig":
     {
-        "min_spot_area": 50
+        "min_spot_area": 50,
         "threshold": 3,
         "gamma": 1.1,
-        "contrast_alpha": 4,
-        "contrast_beta": 20
-    }
+        "contrast_alpha": 4.0,
+        "contrast_beta": 20.0
+    },
     "Targets":
     {
-        "t1": []
+        "t1": [],
         "t2": []
     }
 }
