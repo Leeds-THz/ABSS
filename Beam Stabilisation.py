@@ -26,9 +26,14 @@ from pylablib.devices import Thorlabs, Newport
 from collections import deque, defaultdict
 import pandas as pd
 
+import usb.core
+import usb.backend.libusb1
+import libusb_package
+
+from dataclasses import dataclass
 
 # =====================================================================
-# 1. Configuration
+# Data Classes
 # =====================================================================
 
 log = {
@@ -48,16 +53,6 @@ class CameraConfig:
     exposure: float = 0.02
     frame_period: float = 0.035
 
-from dataclasses import dataclass
-
-@dataclass
-class SpotError:
-    dx: float
-    dy: float
-
-    @property
-    def dist(self) -> float:
-        return float(np.hypot(self.dx, self.dy))
     
 @dataclass
 class DetectionConfig:
@@ -67,27 +62,21 @@ class DetectionConfig:
     contrast_alpha: float = 4.0
     contrast_beta: float = 20.0
 
-# =====================================================================
-# 2. Narrow command interface
-# =====================================================================
-
-Point = Tuple[float, float]
-
-@dataclass
-class Finished:
-    reason: str = ""
-
-@dataclass
-class MoveAxis:
-    axis: int
-    steps: int
-
-Command = Union[MoveAxis, Finished]
-
 
 # =====================================================================
-# 3. Pure vision pipeline
+# Camera Image Processing 
 # =====================================================================
+
+def InitCamera():
+    cam = Thorlabs.ThorlabsTLCamera()
+    cam_cfg = CameraConfig()
+    cam.set_roi(*cam_cfg.roi)
+    cam.set_exposure(cam_cfg.exposure)
+    cam.set_frame_period(cam_cfg.frame_period)
+    cam.start_acquisition()
+
+    return cam
+
 
 def preprocess_image(gray: np.ndarray, cfg: DetectionConfig) -> np.ndarray:
     # Subtract mean background, apply gamma correction
@@ -160,10 +149,6 @@ def process_frame(frame: np.ndarray, cfg: DetectionConfig) -> Tuple[Optional[Lis
     #     return None, processed
     return centroids, processed
 
-# =====================================================================
-# Beam Correction
-# =====================================================================
-
 def GetCurrentCameraFrame(cam):
     # Block until at least one new frame is available and returns the 
     # Loop until there are some frames to get
@@ -214,6 +199,10 @@ def GetSpotError(cam, targetDict, spotNo, axis):
 
     return curError, curSpot
 
+# =====================================================================
+# Beam Correction
+# =====================================================================
+
 def SetTargetPositionsFromCurrentFrame(cam):
     # Get current camera frame
     # GetCurrentCameraFrame()
@@ -228,38 +217,6 @@ def SetTargetPositionsFromCurrentFrame(cam):
 
     # Return centroids of both spots as a dict
     return {"Spot0": [centroids[0][0], centroids[0][1]], "Spot1": [centroids[1][0], centroids[1][1]]}
-
-def DebugDisplay(cam, targetDict):
-    # Display the current camera image with the target positions overlayed
-    a = 1
-    det_cfg = DetectionConfig()
-    # curFrame = GetCurrentCameraFrame(cam)
-    cv2.namedWindow("Live Beam Display", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Live Beam Display", 960, 720)
-    frame = GetCurrentCameraFrame(cam)
-    centroids, processed = process_frame(frame, det_cfg)
-    display = cv2.convertScaleAbs(processed, 4.0, 20.0)
-    if len(display.shape) == 2:
-        display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
-    for i, key in enumerate(["Spot0", "Spot1"]):
-        # Live spot (green)
-        cx, cy = int(centroids[i][0]), int(centroids[i][1])
-        cv2.circle(display, (cx, cy), 8, (0, 255, 0), -1)
-
-        # Target (cyan)
-        tx, ty = int(targetDict[key][0]), int(targetDict[key][1])
-        cv2.circle(display, (tx, ty), 10, (0, 255, 180), -1)
-
-        # Error line + distance text
-        dist = np.hypot(centroids[i][0] - targetDict[key][0],
-                        centroids[i][1] - targetDict[key][1])
-        colour = (0, 255, 0) if dist < 5 else (0, 200, 255) if dist < 20 else (0, 80, 255)
-        cv2.line(display, (tx, ty), (cx, cy), colour, 2)
-        cv2.putText(display, f"{dist:.1f}px",
-                    (tx + 12, ty - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
-
-    cv2.imshow("Live Beam Display", display)
 
 def BeamAlignment(stage, cam, swapSpots=False,
                   errThresh=2.0, max_steps=50, singlePass=True):
@@ -338,53 +295,22 @@ def BeamAlignment(stage, cam, swapSpots=False,
 
     return 0
 
-def plot_pixel_vs_time(csv_path="motor_pixel_log.csv"):
-    df = pd.read_csv(csv_path)
-    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-
-    for spot in [0, 1]:
-        mask = df["spot"] == spot
-        axes[0].plot(df.loc[mask, "t"], df.loc[mask, "px"], '.-', label=f"Spot{spot} X")
-        axes[1].plot(df.loc[mask, "t"], df.loc[mask, "py"], '.-', label=f"Spot{spot} Y")
-
-    axes[0].set_ylabel("Pixel X")
-    axes[1].set_ylabel("Pixel Y")
-    axes[1].set_xlabel("Time (s)")
-    axes[0].legend()
-    axes[1].legend()
-    axes[0].set_title("Spot position vs time")
-    plt.tight_layout()
-    plt.show()
 
 def SettingsDictToDetectorConfig(settingsDict):
     return DetectionConfig(settingsDict["DetectorConfig"]["min_spot_area"])
 
-def plot_motor_activity(csv_path="motor_pixel_log.csv"):
-    df = pd.read_csv(csv_path)
-    fig, ax = plt.subplots(figsize=(12, 5))
-    for m in sorted(df["motor"].unique()):
-        mask = df["motor"] == m
-        ax.stem(df.loc[mask, "t"], df.loc[mask, "steps"],
-                        linefmt=f"C{m-1}-", markerfmt=f"C{m-1}o",
-                        basefmt=" ", label=f"Motor {m}")
-        ax.set_xlabel("Time (s)")
-        ax.set_ylabel("Steps commanded")
-        ax.set_title("Motor movements over time")
-        ax.legend()
-        ax.axhline(0, color='k', lw=0.5)
-        plt.tight_layout()
-        plt.show()
-    # log motor movements in a csv file
-    # log how laser spot moves during the day
+# =====================================================================
+# Main
+# =====================================================================
+
 if __name__ == "__main__":
-    # main()
-    cam = Thorlabs.ThorlabsTLCamera()
-    cam_cfg = CameraConfig()
+    # Acquire the libusb.dll (from libusb_package) and set it as the usb backend
+    libusb1_backend = usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
+    usb_devices = usb.core.find(backend=libusb1_backend, find_all=True)
+
     stage = Newport.Picomotor8742()
-    cam.set_roi(*cam_cfg.roi)
-    cam.set_exposure(cam_cfg.exposure)
-    cam.set_frame_period(cam_cfg.frame_period)
-    cam.start_acquisition()
+
+    cam = InitCamera()
 
     # time.sleep(1)
     print("ABSS Starting...")

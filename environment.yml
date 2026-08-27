@@ -13,4 +13,4 @@ dependencies:
   - pip:
     - pylablib
     - opencv-python
-    - pillow
+    - libusb-package
