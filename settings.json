@@ -1,37 +1,44 @@
 {
-    "Controller_Settings": {
-        "Motor Axis": [
+    "ControllerSettings": {
+        "MotorAxis": [
             1,
             0,
             1,
             0
         ],
-        "Proportional Constant": [
-            5.0,
-            5.0,
-            5.0,
-            5.0
+        "Kp": [
+            10.0,
+            10.0,
+            10.0,
+            10.0
         ],
-        "Error threshold": 0.5,
-        "Error change threshold": 0.1
+        "ErrorThreshold": 0.5
     },
-    "CameraConfig":
-    {
-        "roi": [0, 1440, 0, 1080],
+    "CameraConfig": {
+        "roi": [
+            0,
+            1440,
+            0,
+            1080
+        ],
         "exposure": 0.02,
         "frame_period": 0.035
     },
-    "DetectorConfig":
-    {
+    "DetectorConfig": {
         "min_spot_area": 50,
         "threshold": 3,
         "gamma": 1.1,
         "contrast_alpha": 4.0,
         "contrast_beta": 20.0
     },
-    "Targets":
-    {
-        "t1": [],
-        "t2": []
+    "Targets": {
+        "Spot0": [
+            974.8220297807883,
+            739.1173797479207
+        ],
+        "Spot1": [
+            661.9053465788593,
+            364.94898984261636
+        ]
     }
 }

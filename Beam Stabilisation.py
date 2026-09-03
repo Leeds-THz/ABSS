@@ -183,12 +183,17 @@ def SetTargetPositionsFromCurrentFrame(settingsDict, cam):
     centroids, _ = process_frame(curFrame, det_cfg)
 
     if len(centroids) == 1:
-        return {"Spot0": [centroids[0][0], centroids[0][1]], "Spot1": [0, 0]}
+        # return {"Spot0": [centroids[0][0], centroids[0][1]], "Spot1": [0, 0]}
+        settingsDict["Targets"]["Spot0"] = [centroids[0][0], centroids[0][1]]
+        settingsDict["Targets"]["Spot1"] = [0, 0]
+    elif len(centroids) == 2:
+        settingsDict["Targets"]["Spot0"] = [centroids[0][0], centroids[0][1]]
+        settingsDict["Targets"]["Spot1"] = [centroids[1][0], centroids[1][1]]
 
-    # Return centroids of both spots as a dict
-    return {"Spot0": [centroids[0][0], centroids[0][1]], "Spot1": [centroids[1][0], centroids[1][1]]}
+    # Return centroids of both spots as a dict contained in settingsDict
+    return settingsDict
 
-def BeamAlignment(stage, cam, swapSpots=False,
+def BeamAlignment(stage, cam, settingsDict, swapSpots=False,
                   errThresh=2.0, max_steps=50, singlePass=True):
     """
     Pure motor-axis proportional control.
@@ -196,10 +201,7 @@ def BeamAlignment(stage, cam, swapSpots=False,
     singlePass=True  → one clean pass, then stop when settled
     singlePass=False → continuous correction until lost spots or Ctrl-C
     """
-    targetDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
-
-    motorAxisLUT = [1, 0, 1, 0]      # motor → axis (0=x, 1=y)
-    KpLUT = [5.0, 5.0, 5.0, 5.0]
+    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
 
     log = {
         "t": [], "motor": [], "steps": [], "spot": [],
@@ -242,12 +244,12 @@ def BeamAlignment(stage, cam, swapSpots=False,
                             break
 
                     # Get the current error for the given motor axis
-                    prevError, _ = GetSpotError(cam, targetDict, curSpotNo, motorAxisLUT[i])
+                    prevError, _ = GetSpotError(cam, settingsDict["Targets"], curSpotNo, settingsDict["ControllerSettings"]["MotorAxis"][i])
 
                     # If the error is above threshold
                     if abs(prevError) > errThresh:
                         # Move motor to correct for error
-                        steps_cmd = int(round(KpLUT[i] * prevError))
+                        steps_cmd = int(round(settingsDict["ControllerSettings"]["Kp"][i] * prevError))
 
                         if steps_cmd != 0:
                             stage.move_by(i + 1, steps_cmd)
@@ -284,6 +286,11 @@ def LoadSettings(settingsFile: String = "settings.json"):
     with open(settingsFile, 'r') as f:
         return json.load(f)
 
+def SaveSettings(settingsDict, settingsFile: String = "settings.json"):
+    jsonStr = json.dumps(settingsDict, indent=4)
+    with open(settingsFile, 'w') as f:
+            return f.write(jsonStr) 
+
 
 # =====================================================================
 # Main
@@ -304,8 +311,9 @@ if __name__ == "__main__":
     print("ABSS Starting...")
     # Single Pass Instantiatiom
     # Continuous stabilisation (what you want most of the time)
-    BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=False)
+    BeamAlignment(stage, cam, settingsDict, swapSpots=True, errThresh=settingsDict["ControllerSettings"]["ErrorThreshold"], singlePass=False)
     # One-shot alignment
     # BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=True)
     # plot_pixel_vs_time()
     # plot_motor_activity()
+    SaveSettings(settingsDict)
