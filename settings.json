@@ -1,5 +1,6 @@
 {
     "ControllerSettings": {
+        "SwapSpots": true,
         "MotorAxis": [
             1,
             0,

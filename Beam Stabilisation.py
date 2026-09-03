@@ -127,7 +127,7 @@ def GetCurrentCameraFrame(cam):
             break
     return frames[-1]
 
-def GetCurrentSpot(cam, spotNo):
+def GetCurrentSpot(cam, settingsDict, spotNo):
     # Returns [x, y] of the requested spot (0 or 1)
     # Assumes the two largest spots are ordered consistently
     
@@ -148,19 +148,19 @@ def GetCurrentSpot(cam, spotNo):
     #     return None
     # TODO: Add error handling for no spots
 
-def GetSpotAmount(cam):
+def GetSpotAmount(cam, settingsDict):
     det_cfg = settingsDict["DetectorConfig"]
     curFrame = GetCurrentCameraFrame(cam)
     centroids, _ = process_frame(curFrame, det_cfg)
     SpotAmount = len(centroids)
     return SpotAmount
 
-def GetSpotError(cam, targetDict, spotNo, axis):
+def GetSpotError(cam, settingsDict, spotNo, axis):
     # Load the target position / image
-    curTarget = targetDict["Spot" + str(spotNo)]
+    curTarget = settingsDict["Targets"]["Spot" + str(spotNo)]
     
     # Acquire the current camera image
-    curSpot = GetCurrentSpot(cam, spotNo)
+    curSpot = GetCurrentSpot(cam, settingsDict, spotNo)
     
     # Get the error (manhattan distance)
     # curError = abs(curTarget[0] - curSpot[0]) + abs(curTarget[1] - curSpot[1])
@@ -201,7 +201,6 @@ def BeamAlignment(stage, cam, settingsDict, swapSpots=False,
     singlePass=True  → one clean pass, then stop when settled
     singlePass=False → continuous correction until lost spots or Ctrl-C
     """
-    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
 
     log = {
         "t": [], "motor": [], "steps": [], "spot": [],
@@ -236,7 +235,7 @@ def BeamAlignment(stage, cam, settingsDict, swapSpots=False,
                 while True:
                     # Check if there are two spots on the camera
                     # If there isn't - do nothing
-                    if GetSpotAmount(cam) < 2:
+                    if GetSpotAmount(cam, settingsDict) < 2:
                         if singlePass:
                             print("Lost spots – aborting")
                             return -3
@@ -244,7 +243,7 @@ def BeamAlignment(stage, cam, settingsDict, swapSpots=False,
                             break
 
                     # Get the current error for the given motor axis
-                    prevError, _ = GetSpotError(cam, settingsDict["Targets"], curSpotNo, settingsDict["ControllerSettings"]["MotorAxis"][i])
+                    prevError, _ = GetSpotError(cam, settingsDict, curSpotNo, settingsDict["ControllerSettings"]["MotorAxis"][i])
 
                     # If the error is above threshold
                     if abs(prevError) > errThresh:
@@ -279,6 +278,23 @@ def BeamAlignment(stage, cam, settingsDict, swapSpots=False,
     return 0
 
 # =====================================================================
+# Init
+# =====================================================================
+
+def Init():
+    settingsDict = LoadSettings()
+    
+    # Acquire the libusb.dll (from libusb_package) and set it as the usb backend
+    libusb1_backend = usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
+    usb_devices = usb.core.find(backend=libusb1_backend, find_all=True)
+    
+    stage = Newport.Picomotor8742()
+    
+    cam = InitCamera(settingsDict)
+
+    return settingsDict, stage, cam
+
+# =====================================================================
 # Settings
 # =====================================================================
 
@@ -291,29 +307,59 @@ def SaveSettings(settingsDict, settingsFile: String = "settings.json"):
     with open(settingsFile, 'w') as f:
             return f.write(jsonStr) 
 
+# =====================================================================
+# Tests
+# =====================================================================
+
+
+def SinglePassTest():
+    # Init
+    settingsDict, stage, cam = Init()
+
+    # Set current position as target
+    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
+
+    # Take snapshot
+    startFrame = GetCurrentCameraFrame(cam)
+
+    plt.imshow(startFrame)
+    plt.axis('off')  # Turn off axis labels
+    plt.show()
+    # cv2.imwrite('start.png', startFrame)
+
+    # Wait for the user to misalign system
+    print("Press Enter after system is misaligned...")
+    input()
+
+    # Single bass alignment
+    BeamAlignment(stage, cam, settingsDict, swapSpots=settingsDict["ControllerSettings"]["SwapSpots"], errThresh=settingsDict["ControllerSettings"]["ErrorThreshold"], singlePass=True)
+
+    # Take snapshot
+    endFrame = GetCurrentCameraFrame(cam)
+    # cv2.imwrite('end.png', endFrame)
+    plt.imshow(endFrame)
+    plt.axis('off')  # Turn off axis labels
+    plt.show()
+
+def LoopTest():
+    settingsDict, stage, cam = Init()
+    
+    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
+    
+    # time.sleep(1)
+    print("ABSS Starting...")
+    # Single Pass Instantiatiom
+    # Continuous stabilisation (what you want most of the time)
+    BeamAlignment(stage, cam, settingsDict, swapSpots=settingsDict["ControllerSettings"]["SwapSpots"], errThresh=settingsDict["ControllerSettings"]["ErrorThreshold"], singlePass=False)
+    # One-shot alignment
+    # BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=True)
+    # plot_pixel_vs_time()
+    # plot_motor_activity()
+    SaveSettings(settingsDict)
 
 # =====================================================================
 # Main
 # =====================================================================
 
 if __name__ == "__main__":
-    settingsDict = LoadSettings()
-
-    # Acquire the libusb.dll (from libusb_package) and set it as the usb backend
-    libusb1_backend = usb.backend.libusb1.get_backend(find_library=libusb_package.find_library)
-    usb_devices = usb.core.find(backend=libusb1_backend, find_all=True)
-
-    stage = Newport.Picomotor8742()
-
-    cam = InitCamera(settingsDict)
-
-    # time.sleep(1)
-    print("ABSS Starting...")
-    # Single Pass Instantiatiom
-    # Continuous stabilisation (what you want most of the time)
-    BeamAlignment(stage, cam, settingsDict, swapSpots=True, errThresh=settingsDict["ControllerSettings"]["ErrorThreshold"], singlePass=False)
-    # One-shot alignment
-    # BeamAlignment(stage, cam, swapSpots=True, errThresh=0.5, singlePass=True)
-    # plot_pixel_vs_time()
-    # plot_motor_activity()
-    SaveSettings(settingsDict)
+    SinglePassTest()
