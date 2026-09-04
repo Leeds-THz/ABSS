@@ -172,7 +172,7 @@ def GetSpotError(cam, settingsDict, spotNo, axis):
 # Beam Correction
 # =====================================================================
 
-def SetTargetPositionsFromCurrentFrame(settingsDict, cam):
+def SetTargetPositionsFromCurrentFrame(settingsDict, cam, saveSettings = False, saveImage=False):
     # Get current camera frame
     # GetCurrentCameraFrame()
 
@@ -189,6 +189,18 @@ def SetTargetPositionsFromCurrentFrame(settingsDict, cam):
     elif len(centroids) == 2:
         settingsDict["Targets"]["Spot0"] = [centroids[0][0], centroids[0][1]]
         settingsDict["Targets"]["Spot1"] = [centroids[1][0], centroids[1][1]]
+
+    # Save the settings file if true
+    if saveSettings:
+        SaveSettings(settingsDict)
+
+    # Store an image of the target if 'saveImage' is true
+    if saveImage:
+        curDatetime = datetime.now()
+        plt.imshow(curFrame, cmap='gray')
+        plt.axis('off')  # Turn off axis labels
+        imagePath = curDatetime.strftime("target_%Y_%m_%d_%H-%M.png")
+        plt.savefig(imagePath)
 
     # Return centroids of both spots as a dict contained in settingsDict
     return settingsDict
@@ -317,19 +329,26 @@ def SinglePassTest():
     settingsDict, stage, cam = Init()
 
     # Set current position as target
-    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam)
+    settingsDict = SetTargetPositionsFromCurrentFrame(settingsDict, cam, False)
+    SaveSettings(settingsDict)
 
     # Take snapshot
     startFrame = GetCurrentCameraFrame(cam)
 
-    plt.imshow(startFrame)
+    plt.imshow(startFrame, cmap='gray')
     plt.axis('off')  # Turn off axis labels
-    plt.show()
-    # cv2.imwrite('start.png', startFrame)
+    plt.savefig("start.png")
 
     # Wait for the user to misalign system
     print("Press Enter after system is misaligned...")
     input()
+
+    # Take snapshot
+    misAlignFrame = GetCurrentCameraFrame(cam)
+    
+    plt.imshow(misAlignFrame, cmap='gray')
+    plt.axis('off')  # Turn off axis labels
+    plt.savefig("misaligned.png")
 
     # Single bass alignment
     BeamAlignment(stage, cam, settingsDict, swapSpots=settingsDict["ControllerSettings"]["SwapSpots"], errThresh=settingsDict["ControllerSettings"]["ErrorThreshold"], singlePass=True)
@@ -337,9 +356,18 @@ def SinglePassTest():
     # Take snapshot
     endFrame = GetCurrentCameraFrame(cam)
     # cv2.imwrite('end.png', endFrame)
-    plt.imshow(endFrame)
+    plt.imshow(endFrame, cmap='gray')
     plt.axis('off')  # Turn off axis labels
-    plt.show()
+    plt.savefig("end.png")
+
+    diff = endFrame - startFrame
+    plt.imshow(diff, cmap='gray')
+    plt.axis('off')  # Turn off axis labels
+    plt.savefig("diff.png")
+
+def SettingsTest():
+    settingsDict, stage, cam = Init()
+    SetTargetPositionsFromCurrentFrame(settingsDict, cam, True, True)
 
 def LoopTest():
     settingsDict, stage, cam = Init()
@@ -362,4 +390,6 @@ def LoopTest():
 # =====================================================================
 
 if __name__ == "__main__":
-    SinglePassTest()
+    SettingsTest()
+    # SinglePassTest()
+    # LoopTest()
